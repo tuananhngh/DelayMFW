@@ -8,7 +8,7 @@ using Flux
 using JLD
 include("oracles.jl")
 include("decentralized-algorithms.jl")
-
+include("utils-decentralized.jl")
 Random.seed!(1234);
 train_x, train_y = FashionMNIST.traindata(Float32);
 #train_x, train_y = train_x[:,:,:,1:70000], train_y[1:70000];
@@ -76,8 +76,12 @@ w_er,_ = load_network("er", nb_agents);
 dim = (flat_dim,10)
 
 #ER
-ddsgd_er = dec_delay_sgd(dim, train_data,train_label,nb_agents,w_er, projection_l1,loss, grad, num_iters, max_delay, radius)
-ddmfw_er = dec_delay_mfw(dim, train_data, train_label, nb_agents, w_er, projection_l1, loss, grad, num_iters, zeta, delays, max_delay, radius)
-save("./result-decentralized/fashionmnist/$(num_iters)-$(max_delay)-staticlr-comp.jld", Dict("ddmfw" => ddmfw_er, "ddsgd" => cifar_ddsgd_er));
+println("-----Running DDSGD on ER-----")
+#ddsgd_er = dec_delay_sgd(dim, train_data,train_label,nb_agents,w_er, projection_l1,loss, grad, num_iters, max_delay, radius)
+println("-----Running DDMFW on ER-----")
+#ddmfw_er = dec_delay_mfw(dim, train_data, train_label, nb_agents, w_er, projection_l1, loss, grad, num_iters, zeta, delays, max_delay, radius)
+println("-----Running DDMFW2 on ER-----")
+ddmfw_er2 = dec_delay_mfw2(dim, train_data, train_label, nb_agents, w_er, lmo_fn_dec, loss, grad, num_iters, zeta, delays, radius)
+#save("./result-decentralized/fashionmnist/$(num_iters)-$(max_delay)-staticlr-comp.jld", Dict("ddmfw" => ddmfw_er, "ddmfw2" => ddmfw_er2, "ddsgd" => cifar_ddsgd_er));
 
 

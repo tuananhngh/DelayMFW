@@ -1,6 +1,6 @@
 using Random
 using JLD
-include("params.jl");
+include("params-centralized.jl");
 
 Random.seed!(1234);
 data_cell_centralized = zeros(T, dim);

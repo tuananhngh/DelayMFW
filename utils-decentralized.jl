@@ -69,3 +69,26 @@ function load_network(network_type="er", num_agents=50)
     end
     return (weights, beta);
 end
+
+
+function lmo_fn_dec(V, radius)
+    num_rows, num_cols = size(V)
+    v = zeros(size(V))
+    # Find row indices corresponding to the maximum absolute values in each column
+    idx = argmax(abs.(V), dims=1)
+    for col in 1:num_cols
+        row = idx[col][1]
+        v[row, col] = -radius * sign(V[row, col])
+    end
+    return v
+end
+
+# myV = rand(20,10)
+# ok = zeros(size(myV))
+# idx = argmax(abs.(myV), dims=1)
+# for col in 1:10
+#     row = idx[col][1]
+#     ok[row, col] = -radius .* sign.(myV[row, col])
+# end
+# radius = 8
+# lmo_fn(myV, radius)

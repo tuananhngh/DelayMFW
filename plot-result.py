@@ -10,23 +10,25 @@ import pandas as pd
 font_names = [f.name for f in fm.fontManager.ttflist]
 
 mpl.rcParams['font.family'] = 'Avenir'
-plt.rcParams['font.size'] = 18
+plt.rcParams['font.size'] = 16
 plt.rcParams['axes.linewidth'] = 2
 
-colors = cm.get_cmap('tab10', 3)
+colors = cm.get_cmap('tab10', 4)
 
 graph_styles = ["er","grid","complete"]
-delay_amount = [51, 101, 201, 301, 401, 501, 601]
+delay_amount = [1, 101, 201, 301, 401, 501, 601]
 
-path_centralized = "../result-centralized/"
+path_centralized = "../result-centralized-staticlr/"
 def plot_compare_centralized(delay_amount, path):
     path_read = os.path.join(path, "{}-delay.jld".format(delay_amount))
     with h5py.File(path_read, "r") as f:
         dmfw = f["dmfw"][:]
         dofw = f["dofw"][:]
         bofw = f["bofw"][:]
+        bmfw = f["bmfw"][:]
     iteration = len(dmfw)
     fig = plt.figure(figsize=(4,4))
+    plt.title("Maximum Delay: {}".format(delay_amount))
     ax = fig.add_axes([0,0, 1, 1])
     ax.spines[['top','right']].set_visible(False)
     ax.xaxis.set_tick_params(which='major', size=5, width=2, direction='in')
@@ -37,7 +39,9 @@ def plot_compare_centralized(delay_amount, path):
             markevery=[i for i in range(iteration) if i%500==0], marker="s")
     ax.plot(np.arange(1,iteration+1), np.cumsum(dofw), label="DOFW",linewidth=2, color=colors(1), 
             markevery=[i for i in range(iteration) if i%500==0], marker=">")
-    ax.plot(np.arange(1,iteration+1), np.cumsum(bofw), label="BOFW",linewidth=2, color=colors(2),
+    ax.plot(np.arange(1,iteration+1), np.cumsum(bofw), label="Bold-OFW",linewidth=2, color=colors(2),
+            markevery=[i for i in range(iteration) if i%500==0], marker="o")
+    ax.plot(np.arange(1,iteration+1), np.cumsum(bmfw), label="Bold-MFW",linewidth=2, color=colors(3),
             markevery=[i for i in range(iteration) if i%500==0], marker="o")
     ax.xaxis.set_major_locator(mpl.ticker.MultipleLocator(1000))
     ax.xaxis.set_minor_locator(mpl.ticker.MultipleLocator(200))
@@ -54,28 +58,32 @@ def compare_delay_centralized(delay_amount_list, path):
     values_dmfw = []
     values_dofw = []
     values_bofw = []
+    values_bmfw = []
     for d in delay_amount_list:
         path_read = os.path.join(path, "{}-delay.jld".format(d))
         with h5py.File(path_read, "r") as f:
             dmfw = f["dmfw"][:]
             dofw = f["dofw"][:]
             bofw = f["bofw"][:]
+            bmfw = f["bmfw"][:]
         values_dmfw.append(np.cumsum(dmfw)[-1])
         values_dofw.append(np.cumsum(dofw)[-1])
+        values_bmfw.append(np.cumsum(bmfw)[-1])
         values_bofw.append(np.cumsum(bofw)[-1])
     
     fig = plt.figure(figsize=(4, 4))
     ax = fig.add_axes([0,0, 1, 1])
     ax.spines[['top','right']].set_visible(False)
-    ax.xaxis.set_tick_params(which='major', size=5, width=2, direction='in')
-    ax.xaxis.set_tick_params(which='minor', size=3, width=1, direction='in')
-    ax.yaxis.set_tick_params(which='major', size=5, width=2, direction='in')
-    ax.yaxis.set_tick_params(which='minor', size=3, width=1, direction='in')
+    #ax.xaxis.set_tick_params(which='major', size=5, width=2, direction='in')
+    #ax.xaxis.set_tick_params(which='minor', size=3, width=1, direction='in')
+    #ax.yaxis.set_tick_params(which='major', size=5, width=2, direction='in')
+    #ax.yaxis.set_tick_params(which='minor', size=3, width=1, direction='in')
     ax.plot(delay_amount_list, values_dmfw, label="DeLMFW",linewidth=2, color=colors(0), marker="s")
     ax.plot(delay_amount_list, values_dofw, label="DOFW",linewidth=2, color=colors(1),marker=">")
-    ax.plot(delay_amount_list, values_bofw, label="BOFW",linewidth=2, color=colors(2), marker="o")
+    ax.plot(delay_amount_list, values_bofw, label="Bold-OFW",linewidth=2, color=colors(2), marker="o")
+    ax.plot(delay_amount_list, values_bmfw, label="Bold-MFW",linewidth=2, color=colors(3), marker="o")
     ax.xaxis.set_major_locator(mpl.ticker.MultipleLocator(100))
-    ax.xaxis.set_minor_locator(mpl.ticker.MultipleLocator(20))
+    #ax.xaxis.set_minor_locator(mpl.ticker.MultipleLocator(20))
     ax.yaxis.set_minor_locator(mpl.ticker.MultipleLocator(500))
     ax.set_xlim(0, 600)
     ax.set_xlabel('Maximum Delay', labelpad=10)
@@ -127,8 +135,8 @@ for d in delay_amount:
 compare_delay_centralized(delay_amount, path_centralized)
 
     
-names = ["Mnist","Fashionmnist","cifar10","svhn2"]
-for n in names:
-    figure_regret(n, path_decentralized)
+# names = ["Mnist","Fashionmnist","cifar10","svhn2"]
+# for n in names:
+#     figure_regret(n, path_decentralized)
     
     

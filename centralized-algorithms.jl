@@ -1,4 +1,8 @@
 using Flux
+using Random
+
+
+Random.seed!(1234)
 
 function loss_a(x, data)
     return norm(x,2)^2 + dot(data, x)
@@ -8,7 +12,8 @@ function gradient_a(x, data)
     return Flux.gradient(loss_a, x, data)[1]
 end
 
-function d_ofw(dim, num_iters, max_delay, eta, R, data_cell, delay)
+
+function d_ofw(dim, num_iters, lmo, max_delay, eta, R, data_cell, delay)
     x = ones(dim, 1)
     x = (R * x) / sum(x)
     x_1 = copy(x)
@@ -24,9 +29,10 @@ function d_ofw(dim, num_iters, max_delay, eta, R, data_cell, delay)
             if iner_iter + delay[iner_iter] - 1 == t
                 G += rec_G[:, iner_iter]
                 DF = eta * G + 2 * (x - x_1)
-                index = argmax(abs.(DF))
-                v = zeros(dim, 1)
-                v[index] = -sign(DF[index]) * R
+                # index = argmax(abs.(DF))
+                # v = zeros(dim, 1)
+                # v[index] = -sign(DF[index]) * R
+                v = lmo(DF, R)
                 delta = v - x
                 sigma = min(-0.5 * dot(delta, DF) / dot(delta, delta), 1)
                 x = (1 - sigma) * x + sigma * v
@@ -36,7 +42,7 @@ function d_ofw(dim, num_iters, max_delay, eta, R, data_cell, delay)
     return loss
 end
 
-function bold_ofw(dim, num_iters, max_delay, eta, R, data_cell, delay)
+function bold_ofw(dim, num_iters, lmo, max_delay, eta, R, data_cell, delay)
     x = ones(dim,1)
     x = (R * x) / sum(x)
     x_1 = copy(x)
@@ -62,9 +68,10 @@ function bold_ofw(dim, num_iters, max_delay, eta, R, data_cell, delay)
         G[:,base_id] += gradient_a(x,b)
         DF = eta * G[:,base_id] + 2 * (x - x_1)
         # linear optimization
-        index = argmax(abs.(DF))
-        v = zeros(dim,1)
-        v[index] = -sign(DF[index]) * R
+        # index = argmax(abs.(DF))
+        # v = zeros(dim,1)
+        # v[index] = -sign(DF[index]) * R
+        v = lmo(DF, R)
         delta = v - x
         sigma = min(-0.5 * dot(delta, DF) / dot(delta, delta), 1) # Line Search
         X[:,base_id] = (1 - sigma) * x + sigma * v
@@ -77,27 +84,78 @@ function bold_ofw(dim, num_iters, max_delay, eta, R, data_cell, delay)
     return loss
 end;
 
+function bold_mfw(dim, num_iters, lmo, max_delay, eta, R, data_cell, delay)
+    function update_fpl(oracle_, gradient)
+        #oracle_.n0 = rand(dim);
+        oracle_.accumulated_gradient += gradient;
+        sol = lmo(oracle_.accumulated_gradient*oracle_.eta .+ rand(dim), R);
+        oracle_.x = sol
+    end
 
-function delay_mfw(dim, data_cell, lmo, num_iters, max_delay, delay, zeta, R)
+    function get_vector(oracle_)
+        return oracle_.x
+    end
+
+    x = ones(dim, 1)
+    x = (R * x) / sum(x)
+    is_free = zeros(max_delay+1)
+    n0 = rand(dim)
+    K = Int(ceil(sqrt(num_iters)));
+    oracles = [[FPL(x,eta, zeros(dim), n0, R) for k in 1:K] for d in 1:max_delay+1];
+    loss = zeros(num_iters)
+    st = time()
+    for t = 1:num_iters
+        b = data_cell[t,:]
+        base_id = 1
+        while is_free[base_id] != 0
+            base_id += 1
+        end
+        is_free[base_id] = delay[t]
+        xs = zeros(dim, K+1)
+        v = [get_vector(oracles[base_id][k]) for k in 1:K];
+        for k in 1:K
+            eta_k = 1/k;
+            xs[:,k+1] = (1-eta_k)xs[:,k] + eta_k*v[k]
+        end
+        x = xs[:,K+1]
+        loss[t] = loss_a(x, b)
+        for k in 1:K
+            grad = gradient_a(xs[:,k],b)
+            update_fpl(oracles[base_id][k], grad)
+        end
+        for iner_id = 1:max_delay+1
+            if is_free[iner_id] > 0
+                is_free[iner_id] -= 1
+            end
+        end
+        #println("loss $(loss[t])")
+    end
+    println("Time taken: $(time()-st)");
+    return loss
+end;
+
+function delay_mfw(dim, data_cell, projection, num_iters, max_delay, delay, zeta, R)
+    # function update_fpl(oracle_, gradient)
+    #     oracle_.n0 = rand(dim);
+    #     oracle_.accumulated_gradient += oracle_.eta*gradient;
+    #     sol = lmo_fn(oracle_.accumulated_gradient .+ oracle_.n0, R);
+    #     oracle_.x = sol
+    # end
     function update_projection(oracle_, gradient, zeta_)
         oracle_.zeta = zeta_
         x_ = oracle_.x - oracle_.zeta * gradient
-        oracle_.x = lmo(x_, R)
-    end
-    function update_fpl(oracle_, gradient)
-        oracle_.accumulated_gradient += gradient;
-        sol = lmo(oracle_.accumulated_gradient*oracle_.eta .+ oracle_.n0);
-        oracle_.x = sol
+        oracle_.x = projection(x_, R)
     end
     function get_vector(oracle_)
         return oracle_.x
     end
-    x0 = ones(dim);
-    x0 = (R * x0) / sum(x0);
+    x = ones(dim, 1)
+    x = (R * x) / sum(x)
     K = Int(ceil(sqrt(num_iters)));
+    #K = 3000
     println("K = $(K)");
-    oracles = [ProjectionOracle(x0, zeta) for k in 1:K];
-    
+    oracles = [ProjectionOracle(x,zeta) for k in 1:K];
+    #oracles = [FPL(x, zeta, zeros(dim), rand(dim)) for k in 1:K];
     rewards = zeros(num_iters);
     x_delay = [];
     st = time();
@@ -110,11 +168,12 @@ function delay_mfw(dim, data_cell, lmo, num_iters, max_delay, delay, zeta, R)
             end
         end
         xs = zeros(dim, K+1);
+        xs[:,1] = x;
         gs = zeros(dim, K+1);
-        v = [get_vector(oracles[k]) for k in 1:K];
+        v = [get_vector(oracles[k]) for k in 1:K]
         for k in 1:K
             eta_k = 1/k;
-            xs[:,k+1] = xs[:,k] + eta_k*(v[k]-xs[:,k]);
+            xs[:,k+1] = (1-eta_k)*xs[:,k] + eta_k*v[k]
         end
         if cpt <= max_delay
             push!(x_delay,xs);
@@ -127,6 +186,9 @@ function delay_mfw(dim, data_cell, lmo, num_iters, max_delay, delay, zeta, R)
         @assert length(x_delay) <= max_delay+1;
         xt = xs[:,K+1];
         rewards[t] = loss_a(xt, data_cell[t,:])
+        if t%1000 == 0
+            println("loss $(t): $(rewards[t])")
+        end
         epsilon = 0.01;
         @assert norm(xt,1) <= R+epsilon "Constraint violated";
         f_delay_ = [];
@@ -143,11 +205,71 @@ function delay_mfw(dim, data_cell, lmo, num_iters, max_delay, delay, zeta, R)
             for (s_,s) in zip(f_delay_,f_delay)
                 gs[:,k] += gradient_a(x_delay[s_][:,k], data_cell[s,:]);
             end
-            zeta_ = zeta
-            update_projection(oracles[k], gs[:,k], zeta_);
+            update_projection(oracles[k], gs[:,k], zeta);
+            #update_fpl(oracles[k], gs[:,k]);
         end
     end
-    println("Time taken: $(time()-st)");
+    println("Time taken: $((time()-st)/60) minutes");
     return rewards;
 end;
 
+function delay_mfw2(dim, data_cell, lmo, num_iters, delay, eta, R)
+    function update_fpl(oracle_, gradient)
+        #oracle_.n0 = rand(dim);
+        oracle_.accumulated_gradient += gradient;
+        noise = -1/2 .+ rand(dim);
+        reg = 0.5;
+        sol = lmo(oracle_.accumulated_gradient.* reg * oracle_.eta + noise, oracle_.R);
+        oracle_.x = sol
+    end
+    # function update_projection(oracle_, gradient, zeta_)
+    #     oracle_.zeta = zeta_
+    #     x_ = oracle_.x - oracle_.zeta * gradient
+    #     oracle_.x = projection_l1(x_, R)
+    # end
+    function get_vector(oracle_)
+        return oracle_.x
+    end
+    #x = ones(dim, 1)
+    #x = (R * x) / sum(x)
+    #n0 = rand(dim)
+    #v1 = lmo(n0, R)
+    #println("norm of x0 is $(norm(x,1))")
+    #K = Int(ceil(sqrt(num_iters)));
+    K = num_iters;
+    println("K = $(K)")
+    oracles = [FPL(zeros(dim), eta, zeros(dim), -1/2 .+ rand(dim), R) for k in 1:K]
+    rewards = zeros(num_iters);
+    st = time();
+    #compute ahead the released time for each time step
+    released_time = zeros(Int, num_iters);
+    for (i, ds) in enumerate(delay)
+        released_time[i] = i+ds-1 
+    end
+    gs_ = zeros(dim, K, num_iters);
+    for t in 1:num_iters
+        b = data_cell[t,:]
+        xs = zeros(dim, K+1)
+        #xs[:,1] = x
+        v = [get_vector(oracles[k]) for k in 1:K];
+        for k in 1:K 
+            eta_k = 1/(k);
+            xs[:,k+1] = (1-eta_k)*xs[:,k] + eta_k*v[k]
+        end
+        xt = xs[:,K+1];
+        rewards[t] = loss_a(xt, data_cell[t,:])
+        if t%1 == 0
+            println("loss $(t) $(rewards[t])")
+            #println("norm of xt is $(norm(xt,1))")
+        end
+        #println("Release time of $(t) is $(released_time[t])")
+        for k in 1:K
+            if released_time[t] <= num_iters
+                gs_[:,k,released_time[t]] += gradient_a(xs[:,k],b)
+            end
+            update_fpl(oracles[k], gs_[:,k,t]);
+        end
+    end
+    println("Time taken: $((time()-st)/60) minutes");
+    return rewards;
+end;
