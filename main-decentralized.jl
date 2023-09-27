@@ -7,6 +7,7 @@ using Random
 using JLD
 using Logging
 using Flux
+
 @everywhere using SparseArrays
 # Add worker processes
 #addprocs(4)
