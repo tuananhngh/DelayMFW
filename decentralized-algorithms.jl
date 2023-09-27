@@ -3,21 +3,18 @@ using Random
 
 
 function dec_delay_sgd(dim, data, label, num_agents, weights, projection, f_batch, gradient_batch, num_iters, max_delay, radius)
-    Random.seed!(1234);
     function f_sum(x, data_, label_)
         f_x = @sync @distributed (+) for i in 1:num_agents
             f_batch(x[:,:,i], data_, label_)
         end
         return f_x;
     end
-    println("Data size $(size(data))")
     x0 = @sync @distributed (hcat) for i in 1:num_agents
         projection(rand(dim...), radius)
     end
     x0 = reshape(x0, (dim..., num_agents))
     xt = zeros(num_iters+1, dim..., num_agents)
     xt[1,:,:,:] = x0
-    println("xt shape $(size(xt))")
     delay_agents = fill(max_delay, num_agents)
     loss = zeros(num_iters)
     t_start = time()
@@ -45,11 +42,11 @@ function dec_delay_sgd(dim, data, label, num_agents, weights, projection, f_batc
             tmp_loss[i] = f_sum(xt[t,:,:,:],data[t,:,:,i], label[t,:,i])/num_agents
         end
         loss[t] = maximum(tmp_loss)
-        if t%10==0
-            println("Iteration $(t), Loss $(loss[t])")
+        if t%100==0
+            @info "Iteration $(t), Loss $(loss[t])"
         end
     end
-    println("Time taken: $(time()-t_start)");
+    @info "Time taken: $((time()-t_start)/60 ) minutes"
     return loss
 end
 
@@ -185,39 +182,42 @@ function dec_delay_mfw(dim, data, label, num_agents, weights, projection, f_batc
 end;
 
 
+
+# Function to compute weighted average
+function weighted_average(x::Array{T, 3}, w::Array{T, 2}) where T
+    dim1, dim2, nb_agent = size(x)
+    
+    # Reshape x to a 2D array (dim1*dim2, nb_agent)
+    x_reshaped = reshape(x, dim1*dim2, nb_agent)
+    
+    # Compute the result using dot and broadcast
+    result = x_reshaped * w    
+    # Reshape the result back to the original shape
+    return reshape(result, dim1, dim2, nb_agent)
+end
+
+# Function to compute LMO in parallel
+function distribute_lmo(grad, radius, lmo_function)
+    storage = zeros(size(grad))
+    nb_agents = size(grad, 3)
+    @sync @distributed for i in 1:nb_agents
+        storage[:,:,i] = lmo_function(grad[:,:,i], radius)
+    end
+    return storage
+end
+
+
 function dec_delay_mfw2(dim, data, label, num_agents, weights, lmo, f_batch, gradient_batch, num_iters, eta, delay, radius)
-    Random.seed!(1234);
     function f_sum(x, data_, label_)
         f_x = @sync @distributed (+) for i in 1:num_agents
             f_batch(x[:,:,i], data_, label_)
         end
         return f_x;
     end
-    # Get oracle's output
-    function get_vector(oracle_)
-        return oracle_.x
-    end
-    # Oracle's update
-    function update_fpl(oracle_, gradient)
-        oracle_.accumulated_gradient += gradient;
-        sol = lmo(oracle_.accumulated_gradient*oracle_.eta .+ oracle_.n0, radius);
-        oracle_.x = sol
-    end
-    # Initializa agent's oracle values
-    x0 = ones(dim..., num_agents)
-    for i in 1:num_agents
-        tmp = x0[:,:,i]
-        x0[:,:,i] = R*tmp/sum(tmp)
-    end
-    println("norm x0 $(norm(x0[:,:,1],1))")
-    n0 = rand(dim..., num_agents)
-    K = floor(Int, sqrt(num_iters));
-    println("K $(K)")
-    oracles = [FPL(x0,eta, zeros(dim...,num_agents), n0) for _ in 1:K];
-    rewards = zeros(num_iters);
+    K = 5
+    @info "Running for $(num_iters) Iterations and $(K) Subiterations"
     t_start = time();
-    xt = zeros(dim..., num_agents)
-
+    rewards = zeros(num_iters);
     # Compute feedback time of each agent
     released_time = zeros(Int, num_iters, num_agents);
     for i in 1:num_agents
@@ -225,59 +225,66 @@ function dec_delay_mfw2(dim, data, label, num_agents, weights, lmo, f_batch, gra
             released_time[it,i] = it+ds-1 
         end
     end
-    gs_ = zeros(dim..., K+1, num_iters, num_agents);
+    gs_ = zeros(num_iters, K+1, dim..., num_agents)
+    grad_cell = zeros(K, dim..., num_agents)
+    
     # Main Loops
     for t in 1:num_iters
-        xs = zeros(dim..., K+1, num_agents);
-        v = [get_vector(oracles[k]) for k in 1:K];
+        dt, lb = data[t,:,:,:], label[t,:,:]
+        xs = zeros(K+1, dim..., num_agents);
         for k in 1:K
-            eta_k = 1/k;
-            ys_ = reshape(reshape(xs[:,:,k,:],(dim[1]*dim[2],nb_agents))*weights, (dim..., nb_agents))
-            xs[:,:,k+1,:] = (1-eta_k)*ys_ + eta_k*v[k];
+            sigma = min(1,1/(k+3))
+            injected_noise = rand(dim..., num_agents) .- 0.5
+            obj_lmo = eta*grad_cell[k,:,:,:]+injected_noise
+            v = distribute_lmo(obj_lmo, radius, lmo)
+            ys_ = weighted_average(xs[k,:,:,:], weights)
+            xs[k+1,:,:,:] = (1-sigma)*ys_ + sigma*v
         end
-        
-        xt = xs[:,:,K+1,:];
-        #epsilon = 0.01;
-        #@assert norm(xt[:,:,1],1) <= radius+epsilon "Constraint violated";
+        xt = xs[K+1,:,:,:]
         tmp_rw = zeros(num_agents)
-        
         # Compute loss
         for i in 1:num_agents
-            tmp_rw[i] = f_sum(xt,data[t,:,:,i], label[t,:,i])/num_agents;
+            tmp_rw[i] = f_sum(xt,dt[:,:,i], lb[:,i])/num_agents;
         end
         rewards[t] = maximum(tmp_rw);
         if t%100==0
-            println("Iteration $(t), Loss $(rewards[t])")
+            @info "Iteration $(t), Loss $(rewards[t])"
         end
         # Get feedback_time at time t of all agents
         feedback_at_t = released_time[t,:]
+
         # gs_ is of dimension (dim..., K+1, num_iters, num_agents)
         function add_delay_gradient1(agent_i, time_t, feedback_time)
         # Function compute gs_[...,k=1,...] for all agents 
         # the gradient is then keep at corresponding feedback time
-            x = xs[:,:,1,agent_i]
-            feat = data[time_t,:,:,agent_i]
-            lab = label[time_t,:,agent_i]
+            x = xs[1,:,:,agent_i]
+            feat = dt[:,:,agent_i]
+            lab = lb[:,agent_i]
             fb= feedback_time[agent_i]
             if fb <= num_iters
-                gs_[:,:,1, fb, agent_i] += gradient_batch(x, feat,lab)
-            else 
-                println("From add_delay_gradient1 : Feedback time $(fb) of time $(time_t) of agent $(agent_i) is greater than iterations $(num_iters)")
+                tmp_grad = gradient_batch(x, feat,lab)
+                #@info "size of gs_ $(size(gs_[fb,1,:,:,agent_i]))]))"
+                #@info "size of tmp_grad $(size(tmp_grad))"
+                gs_[fb,1,:,:,agent_i] += tmp_grad
+            # else 
+            #     @warn "From add_delay_gradient1 : Feedback time $(fb) of time $(time_t) of agent $(agent_i) is greater than iterations $(num_iters)"
             end
         end
-
-        function add_delay_gradient2(agent_i, k ,time_t, feedback_time)
+            
         # Function compute gs_[...,k,...] for all agents 
         # the gradient is then keep at corresponding feedback time
-            x1 = xs[:,:,k, agent_i]
-            x2 = xs[:,:,k+1, agent_i]
-            feat = data[time_t, :, :, agent_i]
-            lab = label[time_t, :, agent_i]
+        function add_delay_gradient2(agent_i, k ,time_t, feedback_time, ds)
+            x1 = xs[k,:,:,agent_i]
+            x2 = xs[k+1,:,:,agent_i]
+            feat = dt[:, :, agent_i]
+            lab = lb[:, agent_i]
             fb = feedback_time[agent_i]
             if fb <= num_iters
-                gs_[:,:, k+1, fb, agent_i] += gradient_batch(x2, feat,lab) - gradient_batch(x1, feat, lab)
-            else 
-                println("From add_delay_gradient2 : Feedback time $(fb) of time $(time_t) of agent $(agent_i) is greater than iterations $(num_iters)")
+                tmp_grad1 = gradient_batch(x1, feat,lab)
+                tmp_grad2 = gradient_batch(x2, feat,lab)
+                gs_[fb,k+1,:,:,agent_i] += tmp_grad2-tmp_grad1 + ds[:,:,agent_i]
+            # else 
+            #     @warn "From add_delay_gradient2 : Feedback time $(fb) of time $(time_t) of agent $(agent_i) is greater than iterations $(num_iters)"
             end
         end  
         # Run in parallel initialization of gs_ for k = 1
@@ -286,15 +293,14 @@ function dec_delay_mfw2(dim, data, label, num_agents, weights, lmo, f_batch, gra
         end
         # #Update gradient oracle
         for k in 1:K
-            ds = reshape(reshape(gs_[:,:,k,t,:],(dim[1]*dim[2], nb_agents))*weights, (dim..., nb_agents))
+            ds = weighted_average(gs_[t,k,:,:,:], weights)
             @sync @distributed for i in 1:num_agents 
-                add_delay_gradient2(i, k, t, feedback_at_t)
+                add_delay_gradient2(i, k, t, feedback_at_t, ds)
             end
-            gs_[:,:,k+1,t,:] += ds
-            update_fpl(oracles[k], ds)
+            grad_cell[k,:,:,:] += ds
         end
     end
-    println("Time taken: $(time()-t_start)");
+    @info "Time taken: $((time()-t_start)/60 ) minutes"
     return rewards
 end;
 

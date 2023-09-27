@@ -1,4 +1,4 @@
-Random.seed!(1234);
+#Random.seed!(1234);
 function bold_mfw_ml(dim, data, label, loss_enp, gradient_enp, lmo, num_iters, max_delay, delay, eta, R, K)
     loss_val = zeros(num_iters)
     st = time()

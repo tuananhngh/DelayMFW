@@ -1,5 +1,5 @@
 using MAT, FileIO
-@everywhere using Distributed
+using Distributed
 
 @everywhere function get_delay(delay, max_delay, t)
     f_delay = []
@@ -26,16 +26,6 @@ end
 end
 
 
-
-@everywhere function f_batch(xt, data)
-    f = dot(xt, data) + norm(xt,2)^2;
-    return f
-end
-
-@everywhere function gradient_batch(xt, data)
-    grad = 2*xt + data;
-    return grad
-end
 
 
 @everywhere function delay_hold(cpt, max_delay, curr_delay_hold, x)

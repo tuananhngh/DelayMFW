@@ -41,7 +41,8 @@ end
 
 #data size = (num_iters, batch_size, features, nb_agents)
 nb_classes = 10
-flat_dim, data_cell, label_cell = data_processing(train_x, train_y, 1, 60)
+batch_size = 60
+flat_dim, data_cell, label_cell = data_processing(train_x, train_y, 1, batch_size)
 dim = (flat_dim, nb_classes)
 data_cell = dropdims(data_cell, dims=length(size(data_cell)))
 label_cell = dropdims(label_cell, dims=length(size(label_cell)))
@@ -126,7 +127,7 @@ end
 
 R = 8
 D = 2*R
-max_delay = [1, 11, 21, 31, 41]
+max_delay = [1, 11, 21, 31, 41, 51]
 setting(dim, data_cell, label_cell, loss_fn, grad_fn, lmo_2dim_fn, num_iters, R, D, max_delay)
 plot_loss("./result-centralized-ml", num_iters)
 plot_result("./result-centralized-ml", num_iters)
