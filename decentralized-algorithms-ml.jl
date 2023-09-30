@@ -1,7 +1,7 @@
-Random.seed!(1234);
+#Random.seed!(1234);
 
 # Function to compute weighted average
-function weighted_average(x::Array{T, 3}, w::Array{T, 2}) where T
+@everywhere function weighted_average(x, w)
     dim1, dim2, nb_agent = size(x)
     
     # Reshape x to a 2D array (dim1*dim2, nb_agent)
@@ -9,8 +9,13 @@ function weighted_average(x::Array{T, 3}, w::Array{T, 2}) where T
     
     # Compute the result using dot and broadcast
     result = x_reshaped * w    
+    #result = zeros(dim1, dim2, nb_agent)
     # Reshape the result back to the original shape
+    #@sync @distributed for i in 1:nb_agent
+    #      result[:,:,i] = sum([x[:,:,j] * w[i,j] for j in 1:nb_agent])
+    #end
     return reshape(result, dim1, dim2, nb_agent)
+    #return result
 end
 
 # Function to compute LMO in parallel
@@ -24,33 +29,34 @@ function distribute_lmo(grad, radius, lmo_function)
 end
 
 
-function dec_delay_mfw2(dim, data, label, num_agents, weights, lmo, f_batch, gradient_batch, num_iters, eta, delay, radius)
+function dec_delay_mfw2(dim, data, label, num_agents, weights, lmo, f_batch, gradient_batch, num_iters, eta, delay, radius, K)
     function f_sum(x, data_, label_)
         f_x = @sync @distributed (+) for i in 1:num_agents
             f_batch(x[:,:,i], data_, label_)
         end
         return f_x;
     end
-    K = 5
     @info "Running for $(num_iters) Iterations and $(K) Subiterations"
     t_start = time();
     rewards = zeros(num_iters);
     # Compute feedback time of each agent
     released_time = zeros(Int, num_iters, num_agents);
-    for i in 1:num_agents
+    @sync @distributed for i in 1:num_agents
         for (it, ds) in enumerate(delay[:,i])
             released_time[it,i] = it+ds-1 
         end
     end
     gs_ = zeros(num_iters, K+1, dim..., num_agents)
     grad_cell = zeros(K, dim..., num_agents)
-    
+    #injected_noise = rand(dim..., num_agents) 
     # Main Loops
-    for t in 1:num_iters
+    @showprogress for t in 1:num_iters
         dt, lb = data[t,:,:,:], label[t,:,:]
         xs = zeros(K+1, dim..., num_agents);
         for k in 1:K
             sigma = min(1,1/(k+3))
+            #assume that we know the gradient function to save computation
+            #gs_[t,k,:,:,:] = gradient_batch(xs[k,:,:,:],dt,lb)
             injected_noise = rand(dim..., num_agents) .- 0.5
             obj_lmo = eta*grad_cell[k,:,:,:]+injected_noise
             v = distribute_lmo(obj_lmo, radius, lmo)
@@ -64,10 +70,10 @@ function dec_delay_mfw2(dim, data, label, num_agents, weights, lmo, f_batch, gra
             tmp_rw[i] = f_sum(xt,dt[:,:,i], lb[:,i])/num_agents;
         end
         rewards[t] = maximum(tmp_rw);
-        if t%100==0
-            @info "Iteration $(t), Loss $(rewards[t])"
-        end
-        # Get feedback_time at time t of all agents
+        # if t%10==0
+        #     @info "Iteration $(t), Loss $(rewards[t])"
+        # end
+        #Get feedback_time at time t of all agents
         feedback_at_t = released_time[t,:]
 
         # gs_ is of dimension (dim..., K+1, num_iters, num_agents)
@@ -104,11 +110,11 @@ function dec_delay_mfw2(dim, data, label, num_agents, weights, lmo, f_batch, gra
             #     @warn "From add_delay_gradient2 : Feedback time $(fb) of time $(time_t) of agent $(agent_i) is greater than iterations $(num_iters)"
             end
         end  
-        # Run in parallel initialization of gs_ for k = 1
+        #Run in parallel initialization of gs_ for k = 1
         @sync @distributed for i in 1:num_agents
             add_delay_gradient1(i, t, feedback_at_t)
         end
-        # #Update gradient oracle
+        #Update gradient oracle
         for k in 1:K
             ds = weighted_average(gs_[t,k,:,:,:], weights)
             @sync @distributed for i in 1:num_agents 

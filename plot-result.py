@@ -16,16 +16,18 @@ plt.rcParams['axes.linewidth'] = 2
 colors = cm.get_cmap('tab10', 4)
 
 graph_styles = ["er","grid","complete"]
-delay_amount = [1, 101, 201, 301, 401, 501, 601]
+delay_amount = [1, 11, 21, 31, 41, 51]
 
-path_centralized = "../result-centralized-staticlr/"
-def plot_compare_centralized(delay_amount, path):
+path_centralized = "../result-centralized-ml/"
+path_opt_centralized = "../result-decentralized/Mnist/1000-optimal.jld"
+def plot_compare_centralized(delay_amount, path, path_opt):
     path_read = os.path.join(path, "{}-delay.jld".format(delay_amount))
     with h5py.File(path_read, "r") as f:
         dmfw = f["dmfw"][:]
         dofw = f["dofw"][:]
-        bofw = f["bofw"][:]
         bmfw = f["bmfw"][:]
+    with h5py.File(path_opt, "r") as f:
+        opt = f["opt"][:]
     iteration = len(dmfw)
     fig = plt.figure(figsize=(4,4))
     plt.title("Maximum Delay: {}".format(delay_amount))
@@ -35,18 +37,17 @@ def plot_compare_centralized(delay_amount, path):
     ax.xaxis.set_tick_params(which='minor', size=3, width=1, direction='in')
     ax.yaxis.set_tick_params(which='major', size=5, width=2, direction='in')
     ax.yaxis.set_tick_params(which='minor', size=3, width=1, direction='in')
-    ax.plot(np.arange(1,iteration+1), np.cumsum(dmfw), label="DeLMFW",linewidth=2, color=colors(0),
-            markevery=[i for i in range(iteration) if i%500==0], marker="s")
-    ax.plot(np.arange(1,iteration+1), np.cumsum(dofw), label="DOFW",linewidth=2, color=colors(1), 
-            markevery=[i for i in range(iteration) if i%500==0], marker=">")
-    ax.plot(np.arange(1,iteration+1), np.cumsum(bofw), label="Bold-OFW",linewidth=2, color=colors(2),
-            markevery=[i for i in range(iteration) if i%500==0], marker="o")
-    ax.plot(np.arange(1,iteration+1), np.cumsum(bmfw), label="Bold-MFW",linewidth=2, color=colors(3),
-            markevery=[i for i in range(iteration) if i%500==0], marker="o")
-    ax.xaxis.set_major_locator(mpl.ticker.MultipleLocator(1000))
-    ax.xaxis.set_minor_locator(mpl.ticker.MultipleLocator(200))
+    ax.plot(np.arange(1,iteration+1), opt, label="DeLMFW",linewidth=2, color=colors(0)),
+    # ax.plot(np.arange(1,iteration+1), np.cumsum(dmfw), label="DeLMFW",linewidth=2, color=colors(0),
+    #         markevery=[i for i in range(iteration) if i%100==0], marker="s")
+    # ax.plot(np.arange(1,iteration+1), np.cumsum(dofw), label="DOFW",linewidth=2, color=colors(1), 
+    #         markevery=[i for i in range(iteration) if i%100==0], marker=">")
+    # ax.plot(np.arange(1,iteration+1), np.cumsum(bmfw), label="Bold-MFW",linewidth=2, color=colors(3),
+    #         markevery=[i for i in range(iteration) if i%100==0], marker="o")
+    ax.xaxis.set_major_locator(mpl.ticker.MultipleLocator(200))
+    ax.xaxis.set_minor_locator(mpl.ticker.MultipleLocator(100))
     ax.yaxis.set_minor_locator(mpl.ticker.MultipleLocator(500))
-    ax.set_xlim(-300,5000)
+    ax.set_xlim(-50,iteration)
     ax.set_xlabel('#Iterations', labelpad=10)
     ax.set_ylabel('Cumulative Loss', labelpad=10)
     ax.legend(loc='upper left', frameon=False)
@@ -64,28 +65,25 @@ def compare_delay_centralized(delay_amount_list, path):
         with h5py.File(path_read, "r") as f:
             dmfw = f["dmfw"][:]
             dofw = f["dofw"][:]
-            bofw = f["bofw"][:]
             bmfw = f["bmfw"][:]
         values_dmfw.append(np.cumsum(dmfw)[-1])
         values_dofw.append(np.cumsum(dofw)[-1])
         values_bmfw.append(np.cumsum(bmfw)[-1])
-        values_bofw.append(np.cumsum(bofw)[-1])
     
     fig = plt.figure(figsize=(4, 4))
     ax = fig.add_axes([0,0, 1, 1])
     ax.spines[['top','right']].set_visible(False)
-    #ax.xaxis.set_tick_params(which='major', size=5, width=2, direction='in')
-    #ax.xaxis.set_tick_params(which='minor', size=3, width=1, direction='in')
-    #ax.yaxis.set_tick_params(which='major', size=5, width=2, direction='in')
-    #ax.yaxis.set_tick_params(which='minor', size=3, width=1, direction='in')
+    ax.xaxis.set_tick_params(which='major', size=5, width=2, direction='in')
+    ax.xaxis.set_tick_params(which='minor', size=3, width=1, direction='in')
+    ax.yaxis.set_tick_params(which='major', size=5, width=2, direction='in')
+    ax.yaxis.set_tick_params(which='minor', size=3, width=1, direction='in')
     ax.plot(delay_amount_list, values_dmfw, label="DeLMFW",linewidth=2, color=colors(0), marker="s")
     ax.plot(delay_amount_list, values_dofw, label="DOFW",linewidth=2, color=colors(1),marker=">")
-    ax.plot(delay_amount_list, values_bofw, label="Bold-OFW",linewidth=2, color=colors(2), marker="o")
     ax.plot(delay_amount_list, values_bmfw, label="Bold-MFW",linewidth=2, color=colors(3), marker="o")
     ax.xaxis.set_major_locator(mpl.ticker.MultipleLocator(100))
-    #ax.xaxis.set_minor_locator(mpl.ticker.MultipleLocator(20))
+    ax.xaxis.set_minor_locator(mpl.ticker.MultipleLocator(20))
     ax.yaxis.set_minor_locator(mpl.ticker.MultipleLocator(500))
-    ax.set_xlim(0, 600)
+    ax.set_xlim(0, 51+1)
     ax.set_xlabel('Maximum Delay', labelpad=10)
     ax.set_ylabel('Total Loss', labelpad=10)
     ax.legend(loc='center right', frameon=False)
@@ -130,7 +128,7 @@ def figure_regret(data_name, path):
 
 
 for d in delay_amount:
-    plot_compare_centralized(d, path_centralized)
+    plot_compare_centralized(d, path_centralized, path_opt_centralized)
 
 compare_delay_centralized(delay_amount, path_centralized)
 
@@ -139,4 +137,34 @@ compare_delay_centralized(delay_amount, path_centralized)
 # for n in names:
 #     figure_regret(n, path_decentralized)
     
+path_decen = "../result-decentralized/FashionMnist/"
+path_opt_decen = "../result-decentralized/FashionMnist/1000-optimal.jld"
+def plot_decentralized(path):
+    path_result_er = os.path.join(path, "100-5-21-5-er.jld")
+    path_result_comp = os.path.join(path, "100-5-21-5-complete.jld")
+    path_result_cycle = os.path.join(path, "100-5-21-5-cycle.jld")
+    with h5py.File(path_result_er, "r") as f:
+        ddmfw_er = f["ddmfw"][:]
+    with h5py.File(path_result_comp, "r") as f:
+        ddmfw_comp = f["ddmfw"][:]
+    with h5py.File(path_result_cycle, "r") as f:
+        ddmfw_cycle = f["ddmfw"][:]
+    with h5py.File(path_opt_centralized, "r") as f:
+        opt = f["opt"][:]
+    fig2 = plt.figure(figsize=(4,4))
+    ax = fig2.add_axes([0,0, 1, 1])
+    ax.plot(np.arange(1,len(ddmfw_er)+1), np.cumsum(ddmfw_er), label="De2MFW-ER", color=colors(0), 
+            marker="s", markevery=[i for i in range(len(ddmfw_er)) if i%100==0])
+    ax.plot(np.arange(1,len(ddmfw_comp)+1), np.cumsum(ddmfw_comp), label="De2MFW-COMP", color=colors(1), 
+            marker="s", markevery=[i for i in range(len(ddmfw_comp)) if i%100==0])
+    ax.plot(np.arange(1,len(ddmfw_cycle)+1), np.cumsum(ddmfw_cycle), label="De2MFW-CYCLE", color=colors(2),
+            marker="s", markevery=[i for i in range(len(ddmfw_cycle)) if i%100==0])
+    ax.set_xlim(-1, len(ddmfw_er))
+    #ax.set_ylim(-50,1000)
+    ax.set_xlabel("#Iterations", labelpad=10)
+    ax.set_ylabel("Regret", labelpad=10)
+    ax.legend(loc="upper left", frameon=False)
+    plt.show()
+    
+plot_decentralized(path_decen)
     
