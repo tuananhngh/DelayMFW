@@ -1,87 +1,223 @@
 using MLDatasets
 using LinearAlgebra
 using Statistics
-using Distributed, DistributedArrays
+using Distributed
 using Plots
 using Random
-using Flux
 using JLD
-include("oracles.jl")
-include("decentralized-algorithms.jl")
-include("utils-decentralized.jl")
+using Logging
+using Flux
+using LightGraphs
+using ProgressMeter
+using Profile
+using SparseArrays
+using ArgParse
+
+
+# Add worker processes
+@everywhere using DistributedArrays
+
+include("decentralized-algorithms-ml.jl")
+include("data-handler.jl")
+include("graph_handler.jl")
 Random.seed!(1234);
-train_x, train_y = FashionMNIST.traindata(Float32);
-#train_x, train_y = train_x[:,:,:,1:70000], train_y[1:70000];
-
-
-nb_agents = 10;
-batch_size = 6;
-
-
-function data_processing(train_x, train_y, nb_agents, batch_size)
-    data_shape = size(train_x)
-    println("Data Size $(data_shape)")
-    features = prod(data_shape[1:end-1])
-    chunk_size = Int(data_shape[end]/nb_agents)
-    train_x = reshape(train_x, (features, data_shape[end]))
-    println("Shuffle Data")
-    shuffle_idx = randperm(data_shape[end])
-    train_x, train_y = train_x[:,shuffle_idx], train_y[shuffle_idx]
-    println("Data Shuffled")
-    println("Data Flat $(size(train_x))")
-    agents_data = Array{Float32}(undef, features, chunk_size, nb_agents)
-    agents_label = Array{Int32}(undef, chunk_size, nb_agents)
-    for i in 1:nb_agents
-        agents_data[:,:,i] = train_x[:,(i-1)*chunk_size+1:i*chunk_size]
-        agents_label[:,i] = train_y[(i-1)*chunk_size+1:i*chunk_size]
+# Load network
+function generate_graph(type="er", pl=0.4)
+    if type == "er"
+        graph = erdos_renyi(nb_agents, pl);
+    elseif type == "complete"
+        graph = complete_graph(nb_agents);
+    elseif type == "cycle"
+        graph = cycle_graph(nb_agents);
+    elseif type == "star"
+        graph = star_graph(nb_agents);
+    elseif type == "grid"
+        graph = Grid([5,6]);
     end
-    nb_batches = Int(chunk_size/batch_size)
-    train_data = Array{Float32}(undef, features, batch_size, nb_batches, nb_agents)
-    train_label = Array{Int32}(undef, batch_size, nb_batches, nb_agents)
-    for t in 1:nb_batches
-        train_data[:,:,t,:] = agents_data[:,(t-1)*batch_size+1:t*batch_size,:]
-        train_label[:,t,:] = agents_label[(t-1)*batch_size+1:t*batch_size,:] .+ 1
-    end
-    train_data = permutedims(train_data, [3,2,1,4])
-    train_label = permutedims(train_label, [2,1,3])
-    println("Data reshape $(size(train_data))")
-    println("Label reshape $(size(train_label))")
-    
-    return features, train_data, train_label
+    weight = generate_weighted_adjacency_matrix(graph)
+    spectral_gap = compute_spectral_gap(weight)
+    return graph, weight, spectral_gap
 end
 
-flat_dim, train_data, train_label = data_processing(train_x, train_y, nb_agents, batch_size);
 
-mutable struct ProjectionOracle
-    x
-    zeta
-end;
-
-@everywhere function loss(weights, data, label)
+@everywhere function loss_fn(weights, data, label)
     prediction = Flux.softmax(weights'*data')
     labels = Flux.onehotbatch(label, 1:10)
     return Flux.crossentropy(prediction, labels)
 end
 
-@everywhere function grad(weights, data, labels)
-    return Flux.gradient(loss, weights, data, labels)[1]
+
+@everywhere function grad_fn(weights, data, labels)
+    return Flux.gradient(loss_fn, weights, data, labels)[1]
 end
 
-max_delay = 11;
-num_iters = size(train_data,1)
-radius = 8; # or 50 ,radius of constraint set K
-zeta = 1/sqrt(max_delay*num_iters)
-delays = ceil(Int,0.1*max_delay).*ones(Int,num_iters, nb_agents).-1 .+ rand(1:max_delay-ceil(Int,0.1*max_delay)+1,num_iters, nb_agents);
-w_er,_ = load_network("er", nb_agents);
-dim = (flat_dim,10)
 
-#ER
-println("-----Running DDSGD on ER-----")
-#ddsgd_er = dec_delay_sgd(dim, train_data,train_label,nb_agents,w_er, projection_l1,loss, grad, num_iters, max_delay, radius)
-println("-----Running DDMFW on ER-----")
-#ddmfw_er = dec_delay_mfw(dim, train_data, train_label, nb_agents, w_er, projection_l1, loss, grad, num_iters, zeta, delays, max_delay, radius)
-println("-----Running DDMFW2 on ER-----")
-ddmfw_er2 = dec_delay_mfw2(dim, train_data, train_label, nb_agents, w_er, lmo_fn_dec, loss, grad, num_iters, zeta, delays, radius)
-#save("./result-decentralized/fashionmnist/$(num_iters)-$(max_delay)-staticlr-comp.jld", Dict("ddmfw" => ddmfw_er, "ddmfw2" => ddmfw_er2, "ddsgd" => cifar_ddsgd_er));
+@everywhere function lmo_2dim_fn(v, s=1)
+    dim = size(v)
+    row, col = size(v)
+    max_idx = argmax(abs.(v), dims=1)
+    sol = zeros(dim...)
+    for i in 1:col
+        sol[max_idx[i][1],i] = -s * sign.(v[max_idx[i][1],i])
+    end
+    return sol
+end
 
 
+
+# Main function to run the algorithm on different network
+function run_main_exp(dim, graph_type, train_data, train_label, nb_agents, graph_gen, lmo, loss_function, gradient_function, num_iters, max_delay, radius, path="./result-decentralized/")
+    # generate weight
+    p = 0.3
+    weight_list, spectral_gap_list = [], []
+    for g_type in graph_type
+        @info "Generating $(g_type) graph"
+        _, g_weight, g_spect = graph_gen(g_type, p)
+        push!(weight_list, (g_type,g_weight))
+        push!(spectral_gap_list, (g_type,g_spect))
+    end
+    @info "Spectral Gap: $(spectral_gap_list)"
+    # generate delays
+    delays = ceil(Int,0.1*max_delay).*ones(Int,num_iters, nb_agents).-1 .+ rand(1:max_delay-ceil(Int,0.1*max_delay)+1,num_iters, nb_agents)
+    eta = 1/sqrt(max_delay*num_iters)
+    # Main loop
+    for (idx, w) in enumerate(weight_list)
+        g_type, g_weight = w
+        @info "--------Running for $(g_type)--------"
+        ddmfw = dec_delay_mfw3(dim, train_data, train_label, nb_agents, g_weight, lmo, loss_function, gradient_function, num_iters, eta, delays, max_delay, radius)
+        save(path*"$(g_type).jld", Dict("ddmfw" => ddmfw));
+    end
+end 
+
+function run_main_exp_select_delay(dim, graph_type, train_data, train_label, nb_agents, graph_gen, lmo, loss_function, gradient_function, num_iters, max_delay_total,  max_delay_agent, nb_agent_delay, radius, path="./result-decentralized/")
+    # generate weight
+    p = 0.3
+    weight_list, spectral_gap_list = [], []
+    for g_type in graph_type
+        @info "Generating $(g_type) graph"
+        _, g_weight, g_spect = graph_gen(g_type, p)
+        push!(weight_list, (g_type,g_weight))
+        push!(spectral_gap_list, (g_type,g_spect))
+    end
+    @info "Spectral Gap: $(spectral_gap_list)"
+    # generate delays
+    delays = ceil(Int,0.1*max_delay_total).*ones(Int,num_iters, nb_agents).-1 .+ rand(1:max_delay_total-ceil(Int,0.1*max_delay_total)+1,num_iters, nb_agents)
+    idx_agent_delay = rand(1:nb_agents, nb_agent_delay)
+    for i in 1:nb_agent_delay
+        #delays[:,idx_agent_delay[i]] = ceil(Int,0.1*max_delay_agent).*ones(Int,num_iters, 1).-1 .+ rand(1:max_delay_agent-ceil(Int,0.1*max_delay_agent)+1,num_iters, 1)
+        delays[:,idx_agent_delay[i]] = max_delay_agent .* ones(Int,num_iters, 1)
+    end
+    
+    eta = 1/sqrt(max_delay*num_iters)
+    # Main loop
+    for (idx, w) in enumerate(weight_list)
+        g_type, g_weight = w
+        @info "--------Running for $(g_type)--------"
+        ddmfw = dec_delay_mfw3(dim, train_data, train_label, nb_agents, g_weight, lmo, loss_function, gradient_function, num_iters, eta, delays, max_delay, radius)
+        save(path*"select_$(nb_agent_delay)-$(max_delay_agent)-amaxdelay-$(g_type).jld", Dict("ddmfw" => ddmfw));
+    end
+end 
+
+
+# Define command-line argument parser
+s = ArgParseSettings()
+
+# Add command-line arguments
+@add_arg_table! s begin
+    "--data_name"
+    help = "Dataset name"
+    arg_type = String
+    default = "mnist"
+    
+    "--nb_agents"
+    help = "Number of agents"
+    arg_type = Int
+    default = 25
+    
+    "--batch_size"
+    help = "Batch size"
+    arg_type = Int
+    default = 4
+    
+    "--nb_classes"
+    help = "Number of classes"
+    arg_type = Int
+    default = 10
+    
+    "--max_delay"
+    help = "Maximum delay"
+    arg_type = Int
+    default = 1
+
+    "--max_delay_agent"
+    help = "Maximum delay for selected agent"
+    arg_type = Int
+    default = 10
+
+    "--nb_agent_delay"
+    help = "Number of agents with delay"
+    arg_type = Int
+    default = 25
+    
+    "--radius"
+    help = "Radius"
+    arg_type = Int
+    default = 32
+
+    "--runall"
+    help = "Delay for all agent or only selected agent"
+    arg_type = Bool
+    default = false
+end
+
+# Parse command-line arguments
+args = parse_args(s)
+
+
+println(args)
+
+# Access the parsed arguments
+data_name = args["data_name"]
+nb_agents = args["nb_agents"]
+batch_size = args["batch_size"]
+nb_classes = args["nb_classes"]
+max_delay = args["max_delay"]
+max_delay_agent = args["max_delay_agent"]
+nb_agent_delay = args["nb_agent_delay"]
+radius = args["radius"]
+runall = args["runall"]
+
+
+if data_name == "mnist"
+    train_x, train_y = MNIST.traindata(Float64);
+elseif data_name == "fashionmnist"
+    train_x, train_y = FashionMNIST.traindata(Float64);
+elseif data_name == "cifar10"
+    train_x, train_y = CIFAR10.traindata(Float64);
+end;
+
+
+flat_dim, train_data, train_label = data_processing(train_x, train_y, nb_agents, batch_size);
+dim = (flat_dim, nb_classes)
+num_iters, batch_size, _, num_agents = size(train_data)
+@info "Number of agents: $(num_agents), Batch size: $(batch_size)"
+@info "Weight_Dim : $(dim), Feature: $(flat_dim), , Data size:  $(size(train_data)), Label Size: $(size(train_label))"
+
+
+graph_list = ["er","complete","grid", "cycle"]
+if !isdir("../result-decentralized-ml2/$(data_name)")
+    @info "Creating Directory $(data_name)"
+    mkdir("../result-decentralized-ml2/$(data_name)");
+end;
+
+path = "../result-decentralized-ml2/$(data_name)/$(num_iters)-$(max_delay)-$(nb_agents)-$(radius)-staticdelay-"
+# Run the main experiment
+if runall
+    @info "--------Delay for all agents--------"
+    run_main_exp(dim, graph_list, train_data, train_label, nb_agents, generate_graph, lmo_2dim_fn, loss_fn, grad_fn, num_iters, max_delay, radius, path)
+else
+    @info "------DELAY FOR RANDOMLY SELECTED $(nb_agent_delay) AGENTS------"
+    run_main_exp_select_delay(dim, graph_list, train_data, train_label, nb_agents, generate_graph, lmo_2dim_fn, loss_fn, grad_fn, num_iters, max_delay, max_delay_agent, nb_agent_delay, radius, path)
+end
+
+#rm("./result-decentralized-ml/$(data_name)",recursive=true)
