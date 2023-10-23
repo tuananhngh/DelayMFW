@@ -7,6 +7,7 @@ using Flux
 using JLD
 using FileIO
 using SparseArrays
+using ProgressMeter
 
 include("centralized-algorithms-ml.jl")
 Random.seed!(1234);
@@ -39,7 +40,6 @@ function data_processing(train_x, train_y, nb_agents, batch_size)
     return features, train_data, train_label
 end
 
-#data size = (num_iters, batch_size, features, nb_agents)
 nb_classes = 10
 batch_size = 60
 flat_dim, data_cell, label_cell = data_processing(train_x, train_y, 1, batch_size)
@@ -72,8 +72,10 @@ function lmo_2dim_fn(v, s=1)
     return sol
 end
 
+
+
 function setting(dim, data_x, data_y, loss_fn, gradient_fn, lmo, num_iters, R, D, max_delay)
-    K = 50
+    K = 31
     @info "Running for $(num_iters) Iterations and $(K) Subiterations"
     for md in max_delay
         @info "Running for Max Delay $(md)"
@@ -89,7 +91,6 @@ function setting(dim, data_x, data_y, loss_fn, gradient_fn, lmo, num_iters, R, D
         dofw = d_ofw_ml(dim, data_x, data_y, loss_fn, gradient_fn, lmo, num_iters, md, delay, eta, R)
         save("./result-centralized-ml/$(md)-delay.jld", Dict( "dmfw" => dmfw,"bmfw"=>bmfw,"dofw"=>dofw))
     end
-    #return dmfw, dofw
 end
 
 function plot_loss(path, num_iters)
@@ -127,7 +128,7 @@ end
 
 R = 8
 D = 2*R
-max_delay = [1, 11, 21, 31, 41, 51]
+max_delay = [61, 81, 101]
 setting(dim, data_cell, label_cell, loss_fn, grad_fn, lmo_2dim_fn, num_iters, R, D, max_delay)
 plot_loss("./result-centralized-ml", num_iters)
 plot_result("./result-centralized-ml", num_iters)

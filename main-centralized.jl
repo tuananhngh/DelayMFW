@@ -19,7 +19,6 @@ function setting(dim, data_cell, projection, lmo, num_iters, R, D, G, max_delay)
     for md in max_delay
         delay = ceil(Int,0.1*md).*ones(Int,num_iters).-1 .+ rand(1:md-ceil(Int,0.1*md)+1,num_iters);
         M = D*G/md + D^2*G + D*G^2;
-        #eta =(sqrt(dim)*D)/M*(sqrt(md*num_iters));
         eta = 1/sqrt(md*num_iters) # lr of delayed O-PGD, small learning does not converge
         zeta = 1/sqrt(md*num_iters); #lr of projection
         eta_dofw = D/(sqrt(2)*G*(num_iters+2)^(3/4)); #lr of d-ofw

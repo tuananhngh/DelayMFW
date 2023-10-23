@@ -1,5 +1,6 @@
 using MAT, FileIO
 using Distributed
+using LinearAlgebra
 
 @everywhere function get_delay(delay, max_delay, t)
     f_delay = []
@@ -17,7 +18,7 @@ end
         if cpt <= max_delay
             s_ = s;
             push!(f_delay_,s_) 
-        else
+        else 
             s_ = s-(t-max_delay) ;
             push!(f_delay_,s_);
         end
@@ -42,7 +43,7 @@ end
 
 
 function load_network(network_type="er", num_agents=50)
-    ROOT = "./data/";
+    ROOT = "../data/";
     filename = "$(ROOT)weights_$(network_type)_$(num_agents).mat";
     file = matopen(filename);
     weights = read(file, "weights");
@@ -57,7 +58,7 @@ function load_network(network_type="er", num_agents=50)
     if beta < 1e-8
         beta = 0.0;
     end
-    return (weights, beta);
+    return (weights, 1-beta);
 end
 
 

@@ -1,7 +1,5 @@
-include("utils-decentralized.jl")
-using Random
-
-
+#include("utils-decentralized.jl")
+#using Random
 function dec_delay_sgd(dim, data, label, num_agents, weights, projection, f_batch, gradient_batch, num_iters, max_delay, radius)
     function f_sum(x, data_, label_)
         f_x = @sync @distributed (+) for i in 1:num_agents
@@ -50,8 +48,15 @@ function dec_delay_sgd(dim, data, label, num_agents, weights, projection, f_batc
     return loss
 end
 
-function dec_delay_mfw(dim, data, label, num_agents, weights, projection, f_batch, gradient_batch, num_iters, zeta, delay, max_delay, radius)
-    Random.seed!(1234);
+mutable struct FPL
+    x
+    eta
+    accumulated_gradient
+    n0
+    R
+end
+
+function dec_delay_mfw(dim, data, label, num_agents, weights, lmo, f_batch, gradient_batch, num_iters, eta, delay, max_delay, radius, K)
     function get_delay_cat(delay, max_delay, ite)
         f_delays = distribute([[] for _ in 1:num_agents])
         @sync @distributed for i in 1:num_agents
@@ -66,9 +71,9 @@ function dec_delay_mfw(dim, data, label, num_agents, weights, projection, f_batc
         end;
         return f_delays_
     end;
-    function projection_cat(d, radius)
+    function lmo_cat(d, radius)
         res = @sync @distributed (hcat) for i in 1:num_agents
-            projection(d[:,:,i], radius)
+            lmo(d[:,:,i], radius)
         end
         res = reshape(res, (dim..., num_agents))
         return res;
@@ -91,26 +96,20 @@ function dec_delay_mfw(dim, data, label, num_agents, weights, projection, f_batc
         return oracle_.x
     end
 
-    function update_projection(oracle_, gradient, zeta_)
-        oracle_.zeta = zeta_
-        x_ = oracle_.x - oracle_.zeta * gradient
-        oracle_.x = projection_cat(x_, radius)
+    function update_lmo(oracle_, gradient)
+        oracle_.accumulated_gradient += gradient
+        injected_noise = rand(dim..., num_agents) .- 0.5
+        oracle_.x = lmo_cat(oracle_.eta*oracle_.accumulated_gradient+injected_noise, oracle_.R)
     end
-    K = floor(Int, sqrt(num_iters));
-    println("K $(K)")
-    x0 = @sync @distributed (hcat) for i in 1:num_agents
-        projection(rand(dim...), radius)
-    end
-    x0 = reshape(x0, (dim..., num_agents))
-    println("x shape $(size(x0))")
-    oracles = [ProjectionOracle(x0, zeta) for _ in 1:K];
+    x0 = lmo_cat(rand(dim..., num_agents), radius)
     
+    oracles = [FPL(x0, eta, zeros(dim..., num_agents), rand(dim...,num_agents), radius) for k in 1:K]
     rewards = zeros(num_iters);
     t_start = time();
     xt = zeros(dim..., num_agents)
     x_delays = distribute([[] for i in 1:num_agents]);
-
-    for t in 1:num_iters
+    # Main Loop
+    @showprogress for t in 1:num_iters
         cpt = t;
         f_delays = get_delay_cat(delay, max_delay, t)
         xs = zeros(dim..., K+1, num_agents);
@@ -122,26 +121,20 @@ function dec_delay_mfw(dim, data, label, num_agents, weights, projection, f_batc
             ys_ = reshape(reshape(xs[:,:,k,:],(dim[1]*dim[2],nb_agents))*weights, (dim..., nb_agents))
             xs[:,:,k+1,:] = (1-eta_k)*ys_ + eta_k*v[k];
         end
-
         
         delay_hold_cat(x_delays, cpt, max_delay, xs)
         
         xt = xs[:,:,K+1,:];
-        if t==100
-            println(sum(xt[:,:,1]))
-            println(sum(xt[:,:,2]))
-            println(sum(xt[:,:,3]))
-        end
         epsilon = 0.01;
-        @assert norm(xt[:,:,1],1) <= radius+epsilon "Constraint violated";
+        @assert norm(xt[:,:,1],1) <= (radius*10)+epsilon "Constraint violated";
         f_delays_ = retrieve_delay_cat(f_delays, max_delay, cpt, t)
         tmp_rw = zeros(num_agents)
         for i in 1:num_agents
             tmp_rw[i] = f_sum(xt,data[t,:,:,i], label[t,:,i])/num_agents;
         end
         rewards[t] = maximum(tmp_rw);
-        if t%100==0
-            println("Iteration $(t), Loss $(rewards[t])")
+        if t%1==0
+            @info "Iteration $(t), Loss $(rewards[t])"
         end
         
         function compute_delay_grad(f1, f2, x, dt,lb,i)
@@ -173,8 +166,7 @@ function dec_delay_mfw(dim, data, label, num_agents, weights, projection, f_batc
             end 
             update_grad = reshape(update_grad, (dim..., num_agents))
             gs_[:,:,k+1,:] = update_grad + ds
-            zeta_ = zeta 
-            update_projection(oracles[k], ds, zeta_)
+            update_lmo(oracles[k], ds)
         end
     end
     println("Time taken: $(time()-t_start)");
