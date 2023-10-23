@@ -6,7 +6,6 @@ function generate_weighted_adjacency_matrix(graph::AbstractGraph)
         num_nodes = nv(graph)
         adj_mat = Matrix(adjacency_matrix(graph)) / 1.0
         weight = zeros(Float64, num_nodes, num_nodes)
-        #adjacency_matrix = zeros(Float64, num_nodes, num_nodes)
 
         # Calculate the degrees of each vertex
         degrees = [degree(graph, i) for i in 1:num_nodes]

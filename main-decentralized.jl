@@ -20,7 +20,6 @@ using ArgParse
 include("decentralized-algorithms-ml.jl")
 include("data-handler.jl")
 include("graph_handler.jl")
-include("utils-decentralized.jl")
 Random.seed!(1234);
 # Load network
 function generate_graph(type="er", pl=0.4)
@@ -50,18 +49,6 @@ end
 
 @everywhere function grad_fn(weights, data, labels)
     return Flux.gradient(loss_fn, weights, data, labels)[1]
-end
-
-@everywhere function lmo_fn_dec(V, radius)
-    num_rows, num_cols = size(V)
-    v = spzeros(size(V))
-    # Find row indices corresponding to the maximum absolute values in each column
-    idx = argmax(abs.(V), dims=1)
-    for col in 1:num_cols
-        row = idx[col][1]
-        v[row, col] = -radius * sign(V[row, col])
-    end
-    return v
 end
 
 

@@ -12,11 +12,9 @@ function bold_mfw_ml(dim, data, label, loss_enp, gradient_enp, lmo, num_iters, m
             base_id += 1
         end
         tmp_grad = zeros(K, dim...)
-        #@info "base_id: $(base_id)"
         is_free[base_id] = delay[t]
         for k in 1:K
             sigma = min(1, 1/(k+3))
-            #tmp_grad[k,:,:] = gradient_enp(xs[k,:,:], dt, lb)
             injected_noise = rand(dim...) .- 0.5
             v = lmo(eta*grad_cell[base_id,k,:,:] + injected_noise, R)
             xs[k+1,:,:] = (1-sigma)*xs[k,:,:] + sigma*v
@@ -58,7 +56,6 @@ function delay_mfw_ml(dim, data, label, loss_enp, gradient_enp, lmo, num_iters, 
             xs[k+1,:,:] = (1-sigma)*xs[k,:,:] + sigma * v
         end
         xt = xs[K+1,:,:]
-        #norm_x[t] = norm(xt,1)
         loss_val[t] = loss_enp(xt, dt, lb)
         if t%100 == 0
             @info "Loss $(t): $(loss_val[t])"

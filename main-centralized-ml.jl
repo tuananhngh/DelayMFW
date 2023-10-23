@@ -80,9 +80,9 @@ function setting(dim, data_x, data_y, loss_fn, gradient_fn, lmo, num_iters, R, D
     for md in max_delay
         @info "Running for Max Delay $(md)"
         delay = ceil(Int,0.1*md).*ones(Int,num_iters).-1 .+ rand(1:md-ceil(Int,0.1*md)+1,num_iters);
-        eta = 1/((md*num_iters)^(1/2)) # lr of delayed O-PGD, small learning does not converge
-        zeta = 1/sqrt(md*num_iters); #lr of projection
-        eta_dofw = 1/(sqrt(2)*(num_iters+2)^(3/4)); #lr of d-ofw
+        eta = 1/((md*num_iters)^(1/2)) 
+        zeta = 1/sqrt(md*num_iters); 
+        eta_dofw = 1/(sqrt(2)*(num_iters+2)^(3/4)); 
         @info "------Running DMFW------"
         dmfw = delay_mfw_ml(dim, data_x, data_y, loss_fn, gradient_fn, lmo, num_iters, md, delay, eta, R, K)
         @info "------Running Bold-MFW------"
@@ -133,6 +133,5 @@ setting(dim, data_cell, label_cell, loss_fn, grad_fn, lmo_2dim_fn, num_iters, R,
 plot_loss("./result-centralized-ml", num_iters)
 plot_result("./result-centralized-ml", num_iters)
 
-#a = load(joinpath("./result-centralized-ml/","1-delay.jld"))
 
 #rm("./result-centralized-ml", recursive=true)
