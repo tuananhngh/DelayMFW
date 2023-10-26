@@ -1,1 +1,1 @@
-# Distributed Meta Frank-Wolfe under delayed feedback
+Distributed Meta Frank-Wolfe under delayed feedback
