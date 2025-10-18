@@ -1,4 +1,3 @@
-#Random.seed!(1234);
 function bold_mfw_ml(dim, data, label, loss_enp, gradient_enp, lmo, num_iters, max_delay, delay, eta, R, K)
     loss_val = zeros(num_iters)
     st = time()
@@ -46,11 +45,9 @@ function delay_mfw_ml(dim, data, label, loss_enp, gradient_enp, lmo, num_iters, 
     for t in 1:num_iters
         dt, lb = data[t,:,:], label[t,:]
         xs = zeros(K+1, dim...)
-        for k in 1:K 
+        for k in 1:K
             sigma = min(1,1/(k+3))
-            #assume that we know the gradient function to save computation
             gs_[t,k,:,:] = gradient_enp(xs[k,:,:],dt,lb)
-            #update oracle
             injected_noise = rand(dim...) .- 0.5
             v = lmo(eta * grad_cell[k, :, :] + injected_noise, R) 
             xs[k+1,:,:] = (1-sigma)*xs[k,:,:] + sigma * v

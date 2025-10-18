@@ -1,5 +1,3 @@
-#Random.seed!(1234);
-
 # Function to compute weighted average
 function weighted_average(x, w)
     dim1, dim2, nb_agent = size(x)
@@ -43,8 +41,7 @@ function dec_delay_mfw3(dim, data, label, num_agents, weights, lmo, f_batch, gra
     @info "Main Loops"
     @showprogress for t in 1:num_iters
         dt, lb = data[t,:,:,:], label[t,:,:]
-        xs = zeros(dim..., num_agents);
-        # Assume that we know the gradient to reduce computation
+        xs = zeros(dim..., num_agents)
         tmp_grad = zeros(K+1, dim..., num_agents)
         for k in 1:K
             sigma = min(1,1/(k+3))
@@ -57,19 +54,15 @@ function dec_delay_mfw3(dim, data, label, num_agents, weights, lmo, f_batch, gra
         tmp_grad[K+1,:,:,:] = gradient_cat(xs,dt,lb)
         xt = copy(xs)
         tmp_rw = zeros(num_agents)
-        # Compute loss
-        rw = 0
         for i in 1:num_agents
             tmp_rw[i] += f_sum(xt[:,:,i],dt, lb)/num_agents;
         end
-        rewards[t] = maximum(tmp_rw);
+        rewards[t] = maximum(tmp_rw)
 
-        # Push the gradient at corresponding time for delay feedback
         @sync @distributed for i in 1:num_agents
             push!(gradient_hold[i], (t,tmp_grad[:,:,:,i]))
         end
 
-        # Find delay gradient for feedback at current time
         sum_delay_grad = zeros(K+1, dim..., num_agents)
         @sync @distributed for i in 1:num_agents
             for (idx_s,s) in enumerate(gradient_hold[i])
@@ -79,7 +72,7 @@ function dec_delay_mfw3(dim, data, label, num_agents, weights, lmo, f_batch, gra
                 end
             end
         end
-        # Update gradient oracle
+
         gs_ = zeros(K+1, dim..., num_agents)
         gs_[1,:,:,:] = sum_delay_grad[1,:,:,:]
         for k in 1:K
