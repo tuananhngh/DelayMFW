@@ -8,7 +8,7 @@ Nguyen, T.A., Kim Thang, N., Trystram, D. (2024). In: Bifet, A., et al. (eds) Ma
 
 ## Overview
 
-This code implements projection-free algorithms for distributed learning under delayed feedback. The repository includes implementations for both centralized and decentralized settings using Meta Frank-Wolfe algorithms that are robust to communication delays.
+This code implements projection-free algorithms for distributed learning under delayed feedback. This is a Python port of the original Julia code. The repository includes implementations for both centralized and decentralized settings using Meta Frank-Wolfe algorithms that are robust to communication delays.
 
 ## Algorithms Implemented
 
@@ -22,53 +22,48 @@ This code implements projection-free algorithms for distributed learning under d
 
 ## Requirements
 
-- Julia (with the following packages):
-  - MLDatasets
-  - LinearAlgebra
-  - Plots
-  - Random
-  - Flux
-  - JLD
-  - FileIO
-  - SparseArrays
-  - ProgressMeter
-  - Distributed
-  - LightGraphs
-  - ArgParse
+- [uv](https://docs.astral.sh/uv/) (it installs Python 3.12 and every dependency from `uv.lock`)
+
+```bash
+uv sync
+```
+
+Datasets (MNIST, Fashion-MNIST, CIFAR-10) are downloaded on first use into `~/.cache/delaymfw`
+(override with `$DELAYMFW_DATA` or `--data_dir`).
 
 ## Repository Structure
 
-- [main-centralized-ml.jl](main-centralized-ml.jl) - Main script for centralized experiments
-- [main-decentralized.jl](main-decentralized.jl) - Main script for decentralized experiments
-- [centralized-algorithms-ml.jl](centralized-algorithms-ml.jl) - Implementation of centralized algorithms (Delay-MFW, Bold-MFW, Delay-OFW)
-- [decentralized-algorithms-ml.jl](decentralized-algorithms-ml.jl) - Implementation of decentralized Delay-MFW
-- [data-handler.jl](data-handler.jl) - Data processing utilities for distributing datasets across agents
-- [graph_handler.jl](graph_handler.jl) - Network topology generation and weighted adjacency matrix computation
-- [plot-result.py](plot-result.py) - Visualization script for experimental results
-- [run-decentralized.sh](run-decentralized.sh) - Batch script for running decentralized experiments
+- [src/delaymfw/algorithms/centralized.py](src/delaymfw/algorithms/centralized.py) - Delay-MFW, Bold-MFW, Delay-OFW
+- [src/delaymfw/algorithms/decentralized.py](src/delaymfw/algorithms/decentralized.py) - Decentralized Delay-MFW
+- [src/delaymfw/model.py](src/delaymfw/model.py) - Softmax regression loss, closed-form gradient, linear minimization oracle
+- [src/delaymfw/data.py](src/delaymfw/data.py) - Dataset download/parsing and splitting across agents
+- [src/delaymfw/graph.py](src/delaymfw/graph.py) - Network topologies, gossip matrix and spectral gap
+- [src/delaymfw/cli/centralized.py](src/delaymfw/cli/centralized.py) - Centralized experiment entry point
+- [src/delaymfw/cli/decentralized.py](src/delaymfw/cli/decentralized.py) - Decentralized experiment entry point
+- [src/delaymfw/plotting.py](src/delaymfw/plotting.py) - Figures and CSV summaries
+- [run-decentralized.sh](run-decentralized.sh) - Batch script for decentralized experiments
+- [tests/](tests/) - Unit tests, including checks against line-by-line transcriptions of the original Julia code
 
 ## Usage
 
 ### Centralized Experiments
 
-Run the centralized experiments on MNIST:
-
 ```bash
-julia main-centralized-ml.jl
+uv run delaymfw-centralized
 ```
 
 This will:
 - Load and process the MNIST dataset
 - Run Delay-MFW, Bold-MFW, and Delay-OFW algorithms
-- Test multiple delay settings (max_delay = 61, 81, 101)
-- Save results to `./result-centralized-ml/`
+- Test multiple delay settings (`--max_delay 61 81 101` by default)
+- Save results and loss curves to `./result-centralized-ml/`
+
+Other options: `--data_name`, `--batch_size`, `--radius`, `--K`, `--num_iters`, `--output_dir`, `--seed`, `--no_plot`.
 
 ### Decentralized Experiments
 
-Run decentralized experiments with command-line arguments:
-
 ```bash
-julia main-decentralized.jl --data_name='mnist' --nb_agents=25 --batch_size=4 --nb_classes=10 --max_delay=10 --radius=32 --runall=true
+uv run delaymfw-decentralized --data_name=mnist --nb_agents=25 --batch_size=4 --nb_classes=10 --max_delay=10 --radius=32 --runall=true
 ```
 
 **Parameters:**
@@ -77,28 +72,44 @@ julia main-decentralized.jl --data_name='mnist' --nb_agents=25 --batch_size=4 --
 - `--batch_size`: Batch size per agent
 - `--nb_classes`: Number of classes
 - `--max_delay`: Maximum delay for feedback
-- `--max_delay_agent`: Maximum delay for selected agents (when `runall=false`)
+- `--max_delay_agent`: Fixed delay of the selected agents (when `runall=false`)
 - `--nb_agent_delay`: Number of agents with high delay (when `runall=false`)
 - `--radius`: Radius parameter for the constraint set
 - `--runall`: If `true`, apply delay to all agents; if `false`, apply high delay only to selected agents
+- `--graphs`: Topologies to run (default `er complete grid cycle`; `star` also available)
+- `--edge_prob`, `--num_iters`, `--output_dir` (default `../result-decentralized-ml2`), `--seed`
 
-For batch experiments, use the provided shell script:
+For batch experiments:
 
 ```bash
 bash run-decentralized.sh
+```
+
+### Plots
+
+```bash
+uv run delaymfw-plot centralized --results ./result-centralized-ml --delays 61 81 101
+uv run delaymfw-plot decentralized --results ../result-decentralized-ml2/fashionmnist --iters 1000 --agents 30 --radius 24 --delays 1 31 101 501 --select 2 5 10 20 --max_delay_agent 501
+```
+
+### Tests
+
+```bash
+uv run pytest
 ```
 
 ## Key Features
 
 - **Projection-Free Optimization**: Uses Linear Minimization Oracles (LMO) instead of projections
 - **Delay Tolerance**: Algorithms handle arbitrary delays in gradient feedback
-- **Distributed Computing**: Leverages Julia's `Distributed` package for parallel computation
+- **Vectorized Agents**: All agents of the decentralized setting are updated at once with NumPy
 - **Multiple Network Topologies**: Supports Erdős-Rényi, complete, grid, cycle, and star graphs
 - **Flexible Delay Models**: Uniform delay for all agents or selective high delay for specific agents
 
 ## Results
 
-Results are saved in JLD format and can be visualized using the plotting functions in the main scripts or the Python visualization script.
+Results are saved as HDF5 files (`.h5`, one dataset per algorithm). The plotting command also reads
+`.jld` files produced by the former Julia implementation.
 
 ## Citation
 
