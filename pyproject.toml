@@ -1,0 +1,33 @@
+[project]
+name = "delaymfw"
+version = "0.1.0"
+description = "Projection-free distributed online learning under delayed feedback (Delay-MFW, ECML PKDD 2024)"
+authors = [
+    { name = "tuananhngh", email = "36345111+tuananhngh@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "h5py>=3.16.0",
+    "matplotlib>=3.11.2",
+    "networkx>=3.7",
+    "numpy>=2.5.5",
+    "pandas>=3.1.1",
+    "tqdm>=4.70.1",
+]
+
+[project.scripts]
+delaymfw-centralized = "delaymfw.cli.centralized:main"
+delaymfw-decentralized = "delaymfw.cli.decentralized:main"
+delaymfw-plot = "delaymfw.plotting:main"
+
+[build-system]
+requires = ["uv_build>=0.11.5,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
